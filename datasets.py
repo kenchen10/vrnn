@@ -46,6 +46,25 @@ def get_dataset(config):
         )
 
         img_ch = 3
+    
+    elif config['dataset'] == 'audience':
+        from dataloaders.audience_loader import AudienceDataset
+
+        train_dataset = AudienceDataset(
+            'train',
+            config['seq_len'],
+            normalize=normalize,
+            img_side=128
+        )
+
+        val_dataset = AudienceDataset(
+            'test',
+            config['seq_len'],
+            normalize=normalize,
+            img_side=128
+        )
+
+        img_ch = 3
 
     elif config['dataset'] == 'pushbair_fvd':
         from dataloaders.pushbair_fvd_loader import PushDataset

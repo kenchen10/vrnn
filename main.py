@@ -24,7 +24,9 @@ from utils import torch2img, save_gif
 from logger import MyLogger
 from datasets import get_dataset
 from init_model import init_model
+import wandb
 
+wandb.init(project="vrnn", entity="kenchen10")
 
 torch.backends.cudnn.benchmark = True
 
@@ -34,7 +36,12 @@ torch.backends.cudnn.benchmark = True
 
 def parse_args():
     """Returns a configuration from command line arguments."""
-
+    wandb.config = {
+    "lr": 2e-4,
+    "bs": 2,
+    "n_ctx": 4,
+    "n_steps": 10
+    }
     # Main options
     parser = argparse.ArgumentParser()
 
@@ -55,21 +62,21 @@ def parse_args():
                         help='Resume training with this checkpoint path')
 
     # Hyperparameters
-    parser.add_argument('--n_ctx', required=True, type=int,
+    parser.add_argument('--n_ctx', default=wandb.config['n_ctx'], type=int,
                         help='Number of context frames to use')
-    parser.add_argument('--n_steps', required=True, type=int,
+    parser.add_argument('--n_steps', default=wandb.config['n_steps'], type=int,
                         help='Number of steps to unroll the model for')
-    parser.add_argument('--lr', default=1e-4, type=float,
+    parser.add_argument('--lr', default=wandb.config['lr'], type=float,
                         help='Learning rate for the optimizer')
     parser.add_argument('--n_z', default=10, type=int,
                         help='Number of latents to use.')
-    parser.add_argument('--beta', default=1, type=float,
+    parser.add_argument('--beta', default=.5, type=float,
                         help='Weight for the KL loss in the VAE objective')
     parser.add_argument('--beta_wu', default=0, type=int,
                         help='Use a warm-up schedule for the beta parameter')
 
     # Experiment options
-    parser.add_argument('--batch_size', default=16, type=int,
+    parser.add_argument('--batch_size', default=wandb.config['bs'], type=int,
                         help='Number of examples per batch')
     parser.add_argument('--log_freq', default=100, type=int,
                         help='Display information every X batches')
@@ -194,15 +201,21 @@ def main(config):
         preds = torch.cat(all_preds, -1)
         video = torch.cat([targets, preds], -1)
         log.video('{}_sample'.format(split), video)
+        wandb.log(
+            {'{}_sample'.format(split): wandb.Video(video.detach().cpu().numpy()*255, fps=4, format="gif")}
+        )
 
         (preds, targets), _ = train_fns.reconstruction_step(model, config, frames)
         video = torch.cat([targets, preds], -1)
         log.video('{}_reconstruction'.format(split), video)
-
+        wandb.log(
+            {'{}_reconstruction'.format(split): wandb.Video(video.detach().cpu().numpy()*255, fps=4, format="gif")}
+        )
 
     # Main loop
     abs_batch_idx = 1
     beta2 = config['beta']
+    l = 9999999999999999999
     for epoch_idx in range(config['max_epochs']):
 
         t1 = time.time()
@@ -253,7 +266,7 @@ def main(config):
 
             # if batch_idx == 1: break
             frames, example_idxs = train_fns.prepare_batch(train_batch, config)
-            train_fns.train_step(
+            preds, targets, priors, posteriors, loss_rec, loss_prior, loss, stored_vars = train_fns.train_step(
                 model,
                 config, 
                 frames, 
@@ -261,6 +274,11 @@ def main(config):
                 batch_idx,
                 log
             )
+            
+            wandb.log({
+                "loss_rec_train": loss_rec,
+                "loss_train": loss
+            })
 
             t3 = time.time()
 
@@ -289,12 +307,17 @@ def main(config):
 
             frames, example_idxs = train_fns.prepare_batch(val_batch, config)
 
-            train_fns.test_step(
+            loss, loss_rec = train_fns.test_step(
                 model,
                 config, 
                 frames,
                 log
             )
+            
+            wandb.log({
+                "loss_rec_test": loss_rec,
+                "loss_test": loss
+            })
 
             if not config['multigpu'] or rank == 0:
                 log.increase_test()
@@ -319,8 +342,10 @@ def main(config):
 
             # Save model 
             if (epoch_idx + 1) % config['save_freq'] == 0:
-                torch.save(model.state_dict(), os.path.join(config['out_dir'], 'checkpoints', '{:0>5d}.pth'.format(epoch_idx + 1)))
-                log.print('Model saved')
+                if l > log.last_value('test_loss'):
+                    torch.save(model.state_dict(), os.path.join(config['out_dir'], 'checkpoints', '0.pth'))
+                    log.print('Model saved')
+                    l = log.last_value('test_loss')
 
 
 if __name__ == '__main__':

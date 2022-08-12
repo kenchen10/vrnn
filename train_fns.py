@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.distributions import Normal, kl_divergence
 import numpy as np
 import losses
+import time
 
 
 def prepare_batch(batch, config):
@@ -28,7 +29,11 @@ def sample_pass(frames, model, config, n_steps, use_mean=False, scale_var=1.):
     preds = []
     for step_idx in range(n_steps):
         # print(step_idx)
+        st = time.time()
         (cur_outs, cur_priors, cur_posteriors), _ = model(input_frames, config, True, use_mean=use_mean, scale_var=scale_var)
+        et = time.time()
+        elapsed_time = et - st
+        print('Execution time:', elapsed_time, 'seconds')
         preds.append(cur_outs[:, step_idx])
         input_frames[:, config['n_ctx'] + step_idx] = preds[-1]
     preds = torch.stack(preds, 1)
@@ -146,6 +151,7 @@ def test_step(model, config, inputs, logger=None):
         logger.scalar('test_loss', loss.item())
         if config['beta'] > 0:
             logger.scalar('test_loss_prior', loss_prior.item())
+    return loss, loss_rec
 
 
 def train_print_status(log):

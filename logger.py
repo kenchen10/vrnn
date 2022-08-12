@@ -90,6 +90,9 @@ class MyLogger():
             self.epoch,
             self.abs_train_it,
         )
+        # fname = '{}.gif'.format(
+        #     name
+        # )
         fname = os.path.join(gif_dir, fname)
         utils.save_gif(fname, video)
 
